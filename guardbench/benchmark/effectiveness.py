@@ -35,6 +35,64 @@ def collate_fn(batch):
     return id, label, conversation
 
 
+def evaluate_results(
+    model_name: str,
+    out_dir: str = "results",
+    metrics: list = None,
+) -> None:
+    """Generate an evaluation report from previously saved prediction files.
+
+    Args:
+        model_name (str): Name of the moderation model to evaluate.
+        out_dir (str, optional): Directory containing the saved results. Defaults to "results".
+        metrics (list, optional): Metrics used to evaluate results. If None, defaults to `["f1", "recall"]`.
+    """
+
+    # Set metrics if None  -----------------------------------------------------
+    if isinstance(metrics, str):
+        metrics = [metrics]
+    if metrics is None:
+        metrics = ["f1", "recall"]
+
+    for m in metrics:
+        if m not in metric_mapping:
+            raise ValueError(
+                f"Metric `{m}` is not supported. Supported metrics are: `precision`, `recall`, `f1`, `mcc`, `auprc`, `sensitivity`, `specificity`, `g_mean`, `fpr`, `fnr`, `tn`, `fp`, `fn`, `tp`."
+            )
+
+    pred_path = create_path(out_dir)
+    results = []
+
+    for dataset_folder in sorted(pred_path.iterdir()):
+        if not dataset_folder.is_dir():
+            continue
+
+        dataset_name = dataset_folder.name
+        pred_file = dataset_folder / f"{model_name}.json"
+        true_file = dataset_folder / "y_true.json"
+
+        if not pred_file.exists() or not true_file.exists():
+            continue
+
+        try:
+            y_true = read_json(true_file)
+            y_pred_prob = read_json(pred_file)
+
+            dataset = load_dataset(dataset_name)
+            report = evaluate(y_true, y_pred_prob)
+            results.append([dataset.name] + [format_score(report[m]) for m in metrics])
+        except Exception as e:
+            logger.error(f"Failed to evaluate {dataset_name}, skipping: {e}")
+
+    if not results:
+        logger.warning(f"No results found for model '{model_name}' in '{out_dir}'")
+        return
+
+    headers = ["Dataset"] + [metric_mapping[m] for m in metrics]
+    results_table = get_results_table(headers, results)
+    logger.info(f"Results for '{model_name}':\n{results_table}")
+
+
 def benchmark(
     moderate: callable,
     model_name: str = "moderator",

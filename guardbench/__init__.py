@@ -2,6 +2,7 @@ __all__ = [
     "benchmark_effectiveness",
     "benchmark_efficiency",
     "benchmark",
+    "evaluate_results",
     "CustomDataset",
     "download_all",
     "Report",
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from .benchmark.effectiveness import benchmark
+from .benchmark.effectiveness import benchmark, evaluate_results
 from .benchmark.effectiveness import benchmark as benchmark_effectiveness
 from .benchmark.efficiency import benchmark as benchmark_efficiency
 from .datasets import download_all
