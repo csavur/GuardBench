@@ -58,6 +58,12 @@ def benchmark(
     # Set datasets if "all"  ---------------------------------------------------
     if datasets == "all":
         datasets = list(DATASETS)
+    else:
+        if isinstance(datasets, str):
+            datasets = [datasets]
+        invalid = [d for d in datasets if d not in DATASETS]
+        if invalid:
+            raise ValueError(f"Unknown dataset(s): {invalid}. Available: {list(DATASETS)}")
 
     # Set metrics if None  -----------------------------------------------------
     if isinstance(metrics, str):
