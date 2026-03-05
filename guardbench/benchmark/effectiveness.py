@@ -1,7 +1,7 @@
 from loguru import logger
 from tabulate import tabulate
 from tqdm import tqdm
-from unified_io import create_path, write_json
+from unified_io import create_path, read_json, write_json
 
 from ..datasets import DATASETS, load_dataset
 from ..evaluate import evaluate
@@ -75,33 +75,55 @@ def benchmark(
     logger.start("Benchmarking Effectiveness")
     results = []
     for i, dataset_name in enumerate(datasets):
-        # Dataset --------------------------------------------------------------
-        dataset = load_dataset(dataset_name)
-        batch_generator = dataset.generate_batches(batch_size)
-
-        # Inference ------------------------------------------------------------
-        idx = str(i + 1).zfill(2) if len(datasets) > 9 else i + 1
-        desc = f"{idx}/{len(datasets)} - {dataset.name}"
-        tqdm_kwargs = dict(desc=desc, dynamic_ncols=True, mininterval=1.0)
-
-        ids, y_true, y_pred_prob = [], [], []
-
-        for batch in tqdm(list(batch_generator), **tqdm_kwargs):
-            batch_ids, batch_y_true, batch_conversations = collate_fn(batch)
-            ids += batch_ids
-            y_true += batch_y_true
-            y_pred_prob += moderate(conversations=batch_conversations, **kwargs)
-
-        y_true = dict(zip(ids, y_true))
-        y_pred_prob = dict(zip(ids, y_pred_prob))
-
-        # Save predictions -----------------------------------------------------
         pred_path = create_path(out_dir)
-        write_json(y_pred_prob, pred_path / dataset_name / f"{model_name}.json")
+        pred_file = pred_path / dataset_name / f"{model_name}.json"
+        true_file = pred_path / dataset_name / "y_true.json"
 
-        # Evaluate -------------------------------------------------------------
-        report = evaluate(y_true, y_pred_prob)
-        results.append([dataset.name] + [format_score(report[m]) for m in metrics])
+        # Skip inference if predictions already exist --------------------------
+        if pred_file.exists() and true_file.exists():
+            logger.info(f"Skipping {dataset_name} (predictions already exist)")
+            continue
+
+        try:
+            # Dataset ----------------------------------------------------------
+            dataset = load_dataset(dataset_name)
+            batch_generator = dataset.generate_batches(batch_size)
+
+            # Inference --------------------------------------------------------
+            idx = str(i + 1).zfill(2) if len(datasets) > 9 else i + 1
+            desc = f"{idx}/{len(datasets)} - {dataset.name}"
+            tqdm_kwargs = dict(desc=desc, dynamic_ncols=True, mininterval=1.0)
+
+            ids, y_true, y_pred_prob = [], [], []
+
+            for batch in tqdm(list(batch_generator), **tqdm_kwargs):
+                batch_ids, batch_y_true, batch_conversations = collate_fn(batch)
+                ids += batch_ids
+                y_true += batch_y_true
+                y_pred_prob += moderate(conversations=batch_conversations, **kwargs)
+
+            y_true = dict(zip(ids, y_true))
+            y_pred_prob = dict(zip(ids, y_pred_prob))
+
+            # Save predictions and labels --------------------------------------
+            write_json(y_pred_prob, pred_file)
+            write_json(y_true, true_file)
+
+        except Exception as e:
+            logger.error(f"Failed on {dataset_name}, skipping: {e}")
+
+    # Evaluate -----------------------------------------------------------------
+    pred_path = create_path(out_dir)
+    for i, dataset_name in enumerate(datasets):
+        try:
+            y_true = read_json(pred_path / dataset_name / "y_true.json")
+            y_pred_prob = read_json(pred_path / dataset_name / f"{model_name}.json")
+
+            dataset = load_dataset(dataset_name)
+            report = evaluate(y_true, y_pred_prob)
+            results.append([dataset.name] + [format_score(report[m]) for m in metrics])
+        except Exception as e:
+            logger.error(f"Failed to evaluate {dataset_name}, skipping: {e}")
 
     headers = ["Dataset"] + [metric_mapping[m] for m in metrics]
     results_table = get_results_table(headers, results)
